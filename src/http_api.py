@@ -76,28 +76,33 @@ def make_handler(service: Service, static_dir: str):
         def do_GET(self) -> None:
             try:
                 path = urlparse(self.path).path
+                actor, role = self._identity()
                 if path == "/health":
                     self._json(200, {"status": "ok"})
                 elif path == "/":
                     self._html(root / "index.html")
                 elif path == "/api/items":
-                    actor, role = self._identity()
-                    del actor
                     self._json(200, {"items": service.list_items(role)})
                 elif path.startswith("/api/items/") and path.endswith("/records"):
                     item_id = int(path.split("/")[3])
-                    actor, role = self._identity()
-                    del actor
                     self._json(200, {"records": service.list_records(item_id, role)})
                 elif path.startswith("/api/items/"):
                     item_id = int(path.rsplit("/", 1)[-1])
-                    actor, role = self._identity()
-                    del actor
                     self._json(200, service.get_item(item_id, role))
                 elif path == "/api/audit":
-                    actor, role = self._identity()
-                    del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path.startswith("/api/bridges/") and path.endswith("/notices"):
+                    bridge_id = int(path.split("/")[3])
+                    self._json(200, {"notices": service.list_notices(bridge_id, role)})
+                elif path.startswith("/api/bridges/") and path.endswith("/quota"):
+                    bridge_id = int(path.split("/")[3])
+                    self._json(200, service.quota_status(bridge_id, role))
+                elif path.startswith("/api/bridges/") and path.endswith("/detours"):
+                    bridge_id = int(path.split("/")[3])
+                    self._json(200, {"detours": service.list_detour_routes(bridge_id, role)})
+                elif path.startswith("/api/notices/"):
+                    notice_id = int(path.rsplit("/", 1)[-1])
+                    self._json(200, service.get_notice(notice_id, role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -119,6 +124,30 @@ def make_handler(service: Service, static_dir: str):
                     expected = body.get("expected_version")
                     self._json(200, service.transition(
                         item_id, target, expected, actor, role))
+                elif path.startswith("/api/bridges/") and path.endswith("/notices"):
+                    bridge_id = int(path.split("/")[3])
+                    self._json(201, service.create_restriction(bridge_id, body, actor, role))
+                elif path.startswith("/api/bridges/") and path.endswith("/detours"):
+                    bridge_id = int(path.split("/")[3])
+                    self._json(201, service.add_detour_route(bridge_id, body, actor, role))
+                elif path.startswith("/api/notices/") and path.endswith("/approve"):
+                    notice_id = int(path.split("/")[3])
+                    self._json(200, service.approve_notice(notice_id, body, actor, role))
+                elif path.startswith("/api/notices/") and path.endswith("/publish"):
+                    notice_id = int(path.split("/")[3])
+                    self._json(200, service.publish_notice(notice_id, body, actor, role))
+                elif path.startswith("/api/notices/") and path.endswith("/emergency-publish"):
+                    notice_id = int(path.split("/")[3])
+                    self._json(200, service.emergency_publish(notice_id, body, actor, role))
+                elif path.startswith("/api/notices/") and path.endswith("/review"):
+                    notice_id = int(path.split("/")[3])
+                    self._json(200, service.review_emergency(notice_id, body, actor, role))
+                elif path.startswith("/api/notices/") and path.endswith("/restore"):
+                    notice_id = int(path.split("/")[3])
+                    self._json(200, service.restore_notice(notice_id, body, actor, role))
+                elif path.startswith("/api/notices/") and path.endswith("/recover"):
+                    notice_id = int(path.split("/")[3])
+                    self._json(200, service.recover_notice(notice_id, actor, role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
