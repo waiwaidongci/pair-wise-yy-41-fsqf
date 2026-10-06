@@ -1,1 +1,27 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>桥梁结构监测与限行决策</title><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#17212b}pre{background:#f4f7f9;padding:1rem;overflow:auto}button{padding:.55rem 1rem}</style></head><body><h1>桥梁结构监测与限行决策</h1><p>融合传感、巡检、交通荷载和天气数据，生成限载限行或恢复建议</p><p>监测偏差与预警阈值之比和多条异常记录决定告警等级；限行与封闭决策必须绑定交通通告记录。</p><button onclick="loadItems()">刷新列表</button><pre id="out">使用X-Actor和X-Role请求头调用接口。</pre><script>async function loadItems(){const r=await fetch('/api/items',{headers:{'X-Actor':'demo','X-Role':'viewer'}});document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2)}</script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>桥梁限行发布审批</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#17212b}
+pre{background:#f4f7f9;padding:1rem;overflow:auto}button{padding:.5rem 1rem;margin-right:.5rem}
+</style>
+</head>
+<body>
+<h1>桥梁限行发布审批</h1>
+<p>值班员预警 → 桥梁工程师一级放行 → 安全监督员二级放行；容量联算、额度占用、失效重算、快照与紧急复核。</p>
+<button onclick="loadBridges()">查看桥梁与额度</button>
+<button onclick="loadNotices()">查看通告</button>
+<pre id="out">使用 X-Actor 和 X-Role 请求头调用接口。</pre>
+<script>
+async function get(path, role){
+  const r = await fetch(path, {headers:{'X-Actor':'demo','X-Role':role||'viewer'}});
+  return JSON.stringify(await r.json(), null, 2);
+}
+async function loadBridges(){document.getElementById('out').textContent = await get('/api/bridges');}
+async function loadNotices(){document.getElementById('out').textContent = await get('/api/notices');}
+</script>
+</body>
+</html>

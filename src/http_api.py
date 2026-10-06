@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from .domain import (ConflictError, DomainError, NotFoundError, PermissionDenied,
-                     ValidationError)
+                     QuotaConflict, ValidationError)
 from .service import Service
 
 
@@ -15,7 +15,7 @@ def make_handler(service: Service, static_dir: str):
     root = Path(static_dir)
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "ModularHell/1.0"
+        server_version = "BridgeRestriction/1.0"
 
         def log_message(self, fmt: str, *args: Any) -> None:
             return
@@ -57,47 +57,72 @@ def make_handler(service: Service, static_dir: str):
             return value
 
         def _send_error(self, exc: Exception) -> None:
-            if isinstance(exc, ValidationError):
+            if isinstance(exc, QuotaConflict):
+                status = 409
+                payload = exc.to_dict()
+            elif isinstance(exc, ValidationError):
                 status = 422
+                payload = {"error": exc.__class__.__name__, "message": str(exc)}
             elif isinstance(exc, NotFoundError):
                 status = 404
+                payload = {"error": exc.__class__.__name__, "message": str(exc)}
             elif isinstance(exc, PermissionDenied):
                 status = 403
+                payload = {"error": exc.__class__.__name__, "message": str(exc)}
             elif isinstance(exc, ConflictError):
                 status = 409
+                payload = {"error": exc.__class__.__name__, "message": str(exc)}
             elif isinstance(exc, ValueError):
                 status = 422
+                payload = {"error": "ValueError", "message": str(exc)}
             elif isinstance(exc, DomainError):
                 status = 400
+                payload = {"error": exc.__class__.__name__, "message": str(exc)}
             else:
                 status = 500
-            self._json(status, {"error": exc.__class__.__name__, "message": str(exc)})
+                payload = {"error": "InternalError", "message": str(exc)}
+            self._json(status, payload)
+
+        def _segments(self, path: str):
+            return [s for s in path.split("/") if s]
 
         def do_GET(self) -> None:
             try:
                 path = urlparse(self.path).path
+                query = parse_qs(urlparse(self.path).query)
+                segs = self._segments(path)
                 if path == "/health":
                     self._json(200, {"status": "ok"})
                 elif path == "/":
                     self._html(root / "index.html")
-                elif path == "/api/items":
-                    actor, role = self._identity()
-                    del actor
-                    self._json(200, {"items": service.list_items(role)})
-                elif path.startswith("/api/items/") and path.endswith("/records"):
-                    item_id = int(path.split("/")[3])
-                    actor, role = self._identity()
-                    del actor
-                    self._json(200, {"records": service.list_records(item_id, role)})
-                elif path.startswith("/api/items/"):
-                    item_id = int(path.rsplit("/", 1)[-1])
-                    actor, role = self._identity()
-                    del actor
-                    self._json(200, service.get_item(item_id, role))
+                elif segs == ["api", "bridges"]:
+                    _, role = self._identity()
+                    self._json(200, {"bridges": service.list_bridges(role)})
+                elif len(segs) == 3 and segs[:2] == ["api", "bridges"]:
+                    _, role = self._identity()
+                    self._json(200, service.get_bridge(int(segs[2]), role))
+                elif len(segs) == 4 and segs[:2] == ["api", "bridges"] \
+                        and segs[3] == "context":
+                    _, role = self._identity()
+                    self._json(200, {"records": service.list_context(int(segs[2]), role)})
+                elif segs == ["api", "notices"]:
+                    _, role = self._identity()
+                    bridge_id = query.get("bridge_id", [None])[0]
+                    status = query.get("status", [None])[0]
+                    self._json(200, {"notices": service.list_notices(
+                        role, int(bridge_id) if bridge_id else None, status)})
+                elif len(segs) == 3 and segs[:2] == ["api", "notices"]:
+                    _, role = self._identity()
+                    self._json(200, service.get_notice(int(segs[2]), role))
+                elif len(segs) == 4 and segs[:2] == ["api", "notices"] \
+                        and segs[3] == "diversion":
+                    _, role = self._identity()
+                    self._json(200, service.get_diversion(int(segs[2]), role))
                 elif path == "/api/audit":
-                    actor, role = self._identity()
-                    del actor
-                    self._json(200, {"events": service.audit(role)})
+                    _, role = self._identity()
+                    notice_id = query.get("notice_id", [None])[0]
+                    self._json(200, {"events": service.audit(
+                        role, int(notice_id) if notice_id else None)})
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -106,19 +131,39 @@ def make_handler(service: Service, static_dir: str):
         def do_POST(self) -> None:
             try:
                 path = urlparse(self.path).path
+                segs = self._segments(path)
                 actor, role = self._identity()
                 body = self._body()
-                if path == "/api/items":
-                    self._json(201, service.create_item(body, actor, role))
-                elif path.startswith("/api/items/") and path.endswith("/records"):
-                    item_id = int(path.split("/")[3])
-                    self._json(201, service.add_record(item_id, body, actor, role))
-                elif path.startswith("/api/items/") and path.endswith("/transition"):
-                    item_id = int(path.split("/")[3])
-                    target = body.get("target")
-                    expected = body.get("expected_version")
-                    self._json(200, service.transition(
-                        item_id, target, expected, actor, role))
+                if segs == ["api", "bridges"]:
+                    self._json(201, service.register_bridge(body, actor, role))
+                elif len(segs) == 4 and segs[:2] == ["api", "bridges"] \
+                        and segs[3] == "context":
+                    self._json(201, service.add_context(int(segs[2]), body, actor, role))
+                elif segs == ["api", "notices"]:
+                    self._json(201, service.submit_notice(body, actor, role))
+                elif len(segs) == 4 and segs[:2] == ["api", "notices"]:
+                    notice_id = int(segs[2])
+                    action = segs[3]
+                    if action == "engineer-release":
+                        self._json(200, service.engineer_release(
+                            notice_id, body, actor, role))
+                    elif action == "supervisor-release":
+                        self._json(200, service.supervisor_release(
+                            notice_id, body, actor, role))
+                    elif action == "emergency-release":
+                        self._json(200, service.emergency_release(
+                            notice_id, body, actor, role))
+                    elif action == "review":
+                        self._json(200, service.review_emergency(
+                            notice_id, body, actor, role))
+                    elif action == "restore":
+                        self._json(200, service.restore(
+                            notice_id, body, actor, role))
+                    elif action == "offload":
+                        self._json(200, service.offload(
+                            notice_id, body, actor, role))
+                    else:
+                        self._json(404, {"error": "not_found"})
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
